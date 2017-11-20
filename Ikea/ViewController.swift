@@ -9,21 +9,24 @@
 import UIKit
 import ARKit
 
-class ViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegate {
+class ViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegate, ARSCNViewDelegate {
     
     let itemsArray = [ "cup", "vase", "boxing", "table" ]
     var selectedItem: String?
     @IBOutlet weak var sceneView: ARSCNView!
     @IBOutlet weak var itemsCollectionView: UICollectionView!
+    @IBOutlet weak var planeDetectedLabel: UILabel!
     let configuration = ARWorldTrackingConfiguration()
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        self.sceneView.debugOptions = [ARSCNDebugOptions.showFeaturePoints, ARSCNDebugOptions.showWorldOrigin]
+//        self.sceneView.debugOptions = [ARSCNDebugOptions.showFeaturePoints, ARSCNDebugOptions.showWorldOrigin]
         self.configuration.planeDetection = .horizontal
+        self.sceneView.autoenablesDefaultLighting = true
         self.sceneView.session.run(configuration)
         self.itemsCollectionView.dataSource = self
         self.itemsCollectionView.delegate = self
+        self.sceneView.delegate = self
         self.registerGestureRecognizers()
     }
 
@@ -34,7 +37,42 @@ class ViewController: UIViewController, UICollectionViewDataSource, UICollection
     
     func registerGestureRecognizers(){
         let tapGestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(tapped))
+        let pinchGestureRecognizer = UIPinchGestureRecognizer(target: self, action: #selector(pinched))
+        let longPressGestureRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(longPressed))
+        longPressGestureRecognizer.minimumPressDuration = 0.1
         self.sceneView.addGestureRecognizer(tapGestureRecognizer)
+        self.sceneView.addGestureRecognizer(pinchGestureRecognizer)
+        self.sceneView.addGestureRecognizer(longPressGestureRecognizer)
+    }
+    
+    @objc func longPressed(sender: UILongPressGestureRecognizer){
+        let sceneView = sender.view as! ARSCNView
+        let holdLocation = sender.location(in: sceneView)
+        let hitTest = sceneView.hitTest(holdLocation)
+        if(!hitTest.isEmpty){
+            
+            let result = hitTest.first!
+            let node = result.node
+            
+            if(sender.state == .began){
+                let action = SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: CGFloat(360.degreesToRadians), z: 0, duration: 1))
+                node.runAction(action)
+            }
+            
+            if(sender.state == .ended){
+                node.removeAllActions()
+            }
+        }
+    }
+    
+    func centerPivot(for node: SCNNode) {
+        let min = node.boundingBox.min
+        let max = node.boundingBox.max
+        node.pivot = SCNMatrix4MakeTranslation(
+            min.x + (max.x - min.x)/2,
+            min.y + (max.y - min.y)/2,
+            min.z + (max.z - min.z)/2
+        )
     }
     
     @objc func tapped(sender: UITapGestureRecognizer){
@@ -46,13 +84,30 @@ class ViewController: UIViewController, UICollectionViewDataSource, UICollection
         }
     }
     
+    @objc func pinched(sender: UIPinchGestureRecognizer){
+        let sceneView = sender.view as! ARSCNView
+        let pinchLocation = sender.location(in: sceneView)
+        let hitTest = sceneView.hitTest(pinchLocation)
+        if(!hitTest.isEmpty){
+            let result = hitTest.first!
+            let node = result.node
+            let pinchAction = SCNAction.scale(by: sender.scale, duration: 0)
+            node.runAction(pinchAction)
+            sender.scale = 1.0
+        }
+    }
+    
     func addItem(hitTestResult: ARHitTestResult){
         if let selectedItem = self.selectedItem {
             let scene = SCNScene(named: "Models.scnassets/\(selectedItem).scn")
             let node = scene?.rootNode.childNode(withName: selectedItem, recursively: false)
+            if self.selectedItem == "table" {
+                self.centerPivot(for: node!)
+            }
             let transform = hitTestResult.worldTransform
             let thirdColumn = transform.columns.3
             node?.position = SCNVector3(thirdColumn.x, thirdColumn.y, thirdColumn.z)
+            self.sceneView.scene.rootNode.addChildNode(node!)
         }
         
     }
@@ -77,6 +132,20 @@ class ViewController: UIViewController, UICollectionViewDataSource, UICollection
         let cell = collectionView.cellForItem(at: indexPath)
         cell?.backgroundColor = UIColor.orange
     }
+    
+    func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
+        guard anchor is ARPlaneAnchor else {return}
+        DispatchQueue.main.async {
+            self.planeDetectedLabel.isHidden = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                self.planeDetectedLabel.isHidden = true
+            }
+        }
+    }
 
+}
+
+extension Int{
+    var degreesToRadians: Double { return Double(self) * .pi/180 }
 }
 
